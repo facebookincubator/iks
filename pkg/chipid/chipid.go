@@ -115,7 +115,16 @@ func Get() (*Result, error) {
 type amdSEVSNPExtractor struct{}
 
 func (e *amdSEVSNPExtractor) Extract() (*Result, error) {
-	data, err := os.ReadFile(uefiEventLogPath)
+	data, err := readSEVChipID()
+	if err == nil {
+		return &Result{Vendor: VendorAMDSEVSNP, ID: data}, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// We allow fall through if there's no /dev/sev device, but
+		// if there's a problem with it, bubble it up instead.
+		return nil, fmt.Errorf("failed to read ID from ASP: %w", err)
+	}
+
+	data, err = os.ReadFile(uefiEventLogPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read UEFI event log: %w", err)
 	}
