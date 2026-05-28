@@ -134,7 +134,21 @@ func (e *amdSEVSNPExtractor) Extract() (*Result, error) {
 		return nil, fmt.Errorf("failed to parse event log: %w", err)
 	}
 
-	return extractAMDChipID(eventLog.Events(register.HashSHA256))
+	result, err := extractAMDChipID(eventLog.Events(register.HashSHA256))
+	if err == nil {
+		return result, nil
+	}
+
+	// Fall back to direct PSP access via PCIe. This works even when SEV is
+	// disabled in BIOS or TPM event log is unavailable, but is riskier as
+	// as we're poking the device directly without any locking with
+	// potential kernel users.
+	result, err = readSEVChipIDDirect()
+	if err != nil {
+		return nil, fmt.Errorf("failed direct ChipID read from SP: %w", err)
+	}
+
+	return result, nil
 }
 
 // extractAMDChipID returns the first AMD SEV-SNP ChipID found in PCR 1 events.
