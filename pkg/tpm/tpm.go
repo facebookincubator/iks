@@ -568,8 +568,8 @@ func (tpm *TPM) SelectPCRs(pcrs ...uint) tpm2.TPMLPCRSelection {
 
 // PCR represents a TPM Platform Register.
 type PCR struct {
-	Index  uint
 	Digest []byte
+	Index  uint
 }
 
 // PolicyPCRs represents a list of PCR index that are used to match a policy.

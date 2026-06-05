@@ -24,12 +24,13 @@ import (
 
 // Signer implements crypto.Signer for TPM keys.
 type Signer struct {
-	TpmPath                 string
-	KeyAlg                  tpm2.TPMAlgID
-	PublicBlob, PrivateBlob []byte
-	publicKey               crypto.PublicKey
-	handle                  tpm2.TPMHandle
-	PCRS                    []uint
+	publicKey   crypto.PublicKey
+	TpmPath     string
+	PublicBlob  []byte
+	PrivateBlob []byte
+	PCRS        []uint
+	handle      tpm2.TPMHandle
+	KeyAlg      tpm2.TPMAlgID
 }
 
 // Load loads signing key into tpm.
