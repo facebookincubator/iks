@@ -38,17 +38,17 @@ type SyslogWriter interface {
 // when the attr was added. This ensures WithGroup only qualifies keys
 // of subsequent attrs, per the slog.Handler contract.
 type groupedAttr struct {
-	group string
 	attr  slog.Attr
+	group string
 }
 
 // handler implements slog.Handler backed by a SyslogWriter.
 // Each record is formatted as: <msg> key1=val1 key2=val2 ...
 type handler struct {
 	w     SyslogWriter
-	mu    sync.Mutex
-	attrs []groupedAttr
 	group string
+	attrs []groupedAttr
+	mu    sync.Mutex
 }
 
 func (h *handler) Enabled(_ context.Context, _ slog.Level) bool {
