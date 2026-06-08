@@ -62,12 +62,12 @@ const (
 // Blob is a struct to represent blobs created by IKS
 // (e.g. wrapped blobs, signing key blobs).
 type Blob struct {
-	Btype           Type
-	Public, Private []byte
-	Stype           SessionType
-	PCRs            []uint
-	// this is needed to validate/unwrap imported object.
+	Public         []byte
+	Private        []byte
+	PCRs           []uint
 	EncryptedSeeds []byte
+	Btype          Type
+	Stype          SessionType
 }
 
 // Pack serializes a blob into a byte slice.
