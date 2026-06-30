@@ -157,7 +157,7 @@ func extractAMDChipID(events []tcg.Event) (*Result, error) {
 		if event.Index != 1 {
 			continue
 		}
-		id, err := parseAMDChipIDPayload(event.RawData())
+		id, err := ParseAMDChipIDPayload(event.RawData())
 		if err != nil {
 			continue
 		}
@@ -166,14 +166,14 @@ func extractAMDChipID(events []tcg.Event) (*Result, error) {
 	return nil, errors.New("AMD SEV-SNP ChipID event not found in PCR1 event log")
 }
 
-// parseAMDChipIDPayload extracts the first 64-byte AMD SEV-SNP ChipID from a
+// ParseAMDChipIDPayload extracts the first 64-byte AMD SEV-SNP ChipID from a
 // PCR 1 UEFI event payload. The expected layout is:
 //
 //	bytes 0-3:  "IVES" tag
 //	bytes 4-7:  total length in bytes (little-endian uint32), e.g.
 //	            0x80 0x00 0x00 0x00 for two CPUs on a multi-socket host
 //	bytes 8+:   one 64-byte ChipID per socket
-func parseAMDChipIDPayload(raw []byte) ([]byte, error) {
+func ParseAMDChipIDPayload(raw []byte) ([]byte, error) {
 	if len(raw) < 8+amdChipIDSize {
 		return nil, fmt.Errorf("payload too short: %d bytes", len(raw))
 	}

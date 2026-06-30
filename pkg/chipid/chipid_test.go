@@ -43,7 +43,7 @@ func TestParseCPUVendor(t *testing.T) {
 }
 
 // makeIVESPayload assembles an IVES-tagged payload carrying the given chip IDs.
-// The 4-byte length field is left as zero — parseAMDChipIDPayload doesn't read it.
+// The 4-byte length field is left as zero — ParseAMDChipIDPayload doesn't read it.
 func makeIVESPayload(chips ...[]byte) []byte {
 	out := append([]byte{}, ivesTag...)
 	out = append(out, 0, 0, 0, 0)
@@ -70,7 +70,7 @@ func TestParseAMDChipIDPayload(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseAMDChipIDPayload(tt.raw)
+			got, err := ParseAMDChipIDPayload(tt.raw)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
