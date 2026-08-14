@@ -52,6 +52,14 @@ type TPM struct {
 	srkHandle tpm2.TPMHandle
 }
 
+// ECCEKProfile describes the ECC EK selected for a TPM.
+type ECCEKProfile struct {
+	Curve       tpm2.TPMECCCurve
+	Certificate *x509.Certificate
+}
+
+const amazonTPMVendor = "Amazon"
+
 // authHandleInterface is just tpm2.handle. Unfortunately, tpm2 package exports a type with public fields of private types, so we have to reinvent the private types.
 type authHandleInterface interface {
 	HandleValue() uint32
@@ -65,6 +73,52 @@ func authHandle(handle tpm2.TPMHandle, password string) authHandleInterface {
 	return tpm2.AuthHandle{
 		Handle: handle,
 		Auth:   tpm2.PasswordAuth([]byte(password)),
+	}
+}
+
+// ResolveECCEKProfile selects the ECC EK curve and certificate for a TPM.
+// A nil certificate is valid for TPMs that do not provide an EK certificate.
+func (tpm *TPM) ResolveECCEKProfile() (ECCEKProfile, error) {
+	// We default to the NIST P256 key using the L-2 cert.
+	// If no P256 L-2 cert, look for the P384 H-3 cert.
+	for _, candidate := range [...]struct {
+		index tpm2.TPMHandle
+		curve tpm2.TPMECCCurve
+	}{
+		{EKECCCERTNVIndex, tpm2.TPMECCNistP256},
+		{EKECCCERT384NVIndex, tpm2.TPMECCNistP384},
+	} {
+		certificate, err := tpm.GetEKCert(candidate.index, "")
+		if err == nil {
+			return ECCEKProfile{
+				Curve:       candidate.curve,
+				Certificate: certificate,
+			}, nil
+		}
+	}
+
+	// If neither cert is found, we check the TPM vendor.
+	// If it's AWS Nitro TPM, it is P384 with no EK cert.
+	curve := tpm2.TPMECCNistP256
+	vendor, _, err := tpm.GetModel()
+	if err != nil {
+		return ECCEKProfile{}, fmt.Errorf("failed to get TPM model: %w", err)
+	}
+
+	if vendor == amazonTPMVendor {
+		curve = tpm2.TPMECCNistP384
+	}
+	return ECCEKProfile{Curve: curve}, nil
+}
+
+func getECCEKTemplate(curve tpm2.TPMECCCurve) (tpm2.TPMTPublic, error) {
+	switch curve {
+	case tpm2.TPMECCNistP256:
+		return tpm2.ECCEKTemplate, nil
+	case tpm2.TPMECCNistP384:
+		return GetECCEKP384Template(), nil
+	default:
+		return tpm2.TPMTPublic{}, fmt.Errorf("unsupported ECC curve: %v", curve)
 	}
 }
 
@@ -91,27 +145,13 @@ func (tpm *TPM) CreateECCEK(password string) error {
 	passwordBytes := []byte(password)
 	tpmTransport := transport.FromReadWriter(tpm.rwc)
 
-	// We default to the NIST P256 key using the L-2 cert
-	ekTemplate := tpm2.ECCEKTemplate
-
-	_, err := tpm.GetEKCert(EKECCCERTNVIndex, "")
+	profile, err := tpm.ResolveECCEKProfile()
 	if err != nil {
-		// No P256 L-2 cert? Look for the P384 H-3 cert
-		_, err = tpm.GetEKCert(EKECCCERT384NVIndex, "")
-		if err == nil {
-			ekTemplate = GetECCEKP384Template()
-		} else {
-			// Neither cert?
-			vendor, _, err := tpm.GetModel()
-			if err != nil {
-				return fmt.Errorf("failed to get TPM model: %w", err)
-			}
-			// AWS Nitro is P384, with no EK certificate, otherwise
-			// keep P256
-			if vendor == "Amazon" {
-				ekTemplate = GetECCEKP384Template()
-			}
-		}
+		return err
+	}
+	ekTemplate, err := getECCEKTemplate(profile.Curve)
+	if err != nil {
+		return err
 	}
 
 	cmd := tpm2.CreatePrimary{
@@ -213,15 +253,9 @@ func (tpm *TPM) CreateRSAEK(password string) error {
 // LoadECCEK creates and loads the ECC based Endorsement Key using the provided
 // endorsement hierarchy password. The loaded handle is then returned.
 func (tpm *TPM) LoadECCEK(password string, alg tpm2.TPMECCCurve) (tpm2.TPMHandle, error) {
-	// The default one is NIST P256.
-	var ekTemplate tpm2.TPMTPublic
-	switch alg {
-	case tpm2.TPMECCNistP256:
-		ekTemplate = tpm2.ECCEKTemplate
-	case tpm2.TPMECCNistP384:
-		ekTemplate = GetECCEKP384Template()
-	default:
-		return 0, fmt.Errorf("unsupported ECC curve: %v", alg)
+	ekTemplate, err := getECCEKTemplate(alg)
+	if err != nil {
+		return 0, err
 	}
 
 	passwordBytes := []byte(password)
