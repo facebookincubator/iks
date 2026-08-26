@@ -17,24 +17,93 @@ package tpm
 import (
 	"bytes"
 	"crypto"
+	"errors"
 	"fmt"
 
 	"github.com/google/go-tpm/tpm2"
 )
 
+// pcrAlg maps a PCR digest width to the hash algorithm of the bank the digest was read from.
+// Every bank has a distinct digest width, so the width alone identifies the bank.
+func pcrAlg(digestLen int) (tpm2.TPMIAlgHash, error) {
+	switch digestLen {
+	case crypto.SHA256.Size():
+		return tpm2.TPMAlgSHA256, nil
+	case crypto.SHA384.Size():
+		return tpm2.TPMAlgSHA384, nil
+	case crypto.SHA512.Size():
+		return tpm2.TPMAlgSHA512, nil
+	default:
+		return 0, fmt.Errorf("%d byte digest matches no known PCR bank", digestLen)
+	}
+}
+
+// pcrBankAlg infers which PCR bank the attested state was read from. The bank is not carried
+// alongside the attested values, but each bank has a distinct digest width. It has to be named
+// correctly in the selection: the selection is marshalled into the policy digest, so claiming a
+// bank the values did not come from yields a digest the attester's TPM never computed.
+// The first selected PCR sets the bank, and every other selected PCR has to agree with it.
+func pcrBankAlg(selectedPCRs []uint, pcrDigestByIndex map[uint][]byte) (tpm2.TPMIAlgHash, error) {
+	if len(selectedPCRs) == 0 {
+		return 0, errors.New("policy selects no PCRs")
+	}
+
+	firstPCR := selectedPCRs[0]
+	firstDigest, ok := pcrDigestByIndex[firstPCR]
+	if !ok {
+		return 0, fmt.Errorf("PCR index %d not found in state", firstPCR)
+	}
+
+	bankAlg, err := pcrAlg(len(firstDigest))
+	if err != nil {
+		return 0, fmt.Errorf("PCR index %d: %w", firstPCR, err)
+	}
+
+	for _, idx := range selectedPCRs[1:] {
+		digest, ok := pcrDigestByIndex[idx]
+		if !ok {
+			return 0, fmt.Errorf("PCR index %d not found in state", idx)
+		}
+
+		alg, err := pcrAlg(len(digest))
+		if err != nil {
+			return 0, fmt.Errorf("PCR index %d: %w", idx, err)
+		}
+
+		if alg != bankAlg {
+			return 0, fmt.Errorf(
+				"PCR index %d is from bank 0x%04x, but PCR index %d is from bank 0x%04x",
+				idx, uint16(alg), firstPCR, uint16(bankAlg),
+			)
+		}
+	}
+
+	return bankAlg, nil
+}
+
 // computePolicyDigestFromPCRs computes the expected auth policy digest from PCR values.
 // We use PolicyPCR to compute policy digest.
-func computePolicyDigestFromPCRs(expectedPCRPolicy PolicyPCRs, pcrsState []PCR) ([]byte, error) {
+func computePolicyDigestFromPCRs(expectedPCRPolicy PolicyPCRs, pcrsState []PCR, sessionAlg tpm2.TPMIAlgHash) ([]byte, error) {
 	// We use policy calculator to calculate policy digest without a TPM
-	policyCalc, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+	policyCalc, err := tpm2.NewPolicyCalculator(sessionAlg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create policy calculator: %w", err)
+		return nil, fmt.Errorf("failed to create policy calculator for session alg 0x%04x: %w", uint16(sessionAlg), err)
+	}
+
+	pcrDigestByIndex := make(map[uint][]byte, len(pcrsState))
+	for _, pcr := range pcrsState {
+		pcrDigestByIndex[pcr.Index] = pcr.Digest
+	}
+
+	bankAlg, err := pcrBankAlg(expectedPCRPolicy.PCRs, pcrDigestByIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine PCR bank from attested state: %w", err)
 	}
 
 	// This part is used for get tpm2.TPMLPCRSelection
 	// Basically the PCR to include in the check digest
 	pcrSelection := tpm2.TPMSPCRSelection{
-		Hash:      tpm2.TPMAlgSHA256,
+		Hash:      bankAlg,
 		PCRSelect: tpm2.PCClientCompatible.PCRs(expectedPCRPolicy.PCRs...),
 	}
 
@@ -45,12 +114,12 @@ func computePolicyDigestFromPCRs(expectedPCRPolicy PolicyPCRs, pcrsState []PCR) 
 	// This is algorithm to calculate PCR Digest
 	// PCR_Digest = Hash(PCRa || PCRb || PCRc || ... || PCRn)
 	// Please refer to Part 3, Commands, section 23.7.2
-	pcrDigestByIndex := make(map[uint][]byte, len(pcrsState))
-	for _, pcr := range pcrsState {
-		pcrDigestByIndex[pcr.Index] = pcr.Digest
+	sessionHash, err := sessionAlg.Hash()
+	if err != nil {
+		return nil, fmt.Errorf("unsupported policy session hash algorithm 0x%04x: %w", uint16(sessionAlg), err)
 	}
 
-	hash := crypto.SHA256.New()
+	hash := sessionHash.New()
 	for _, idx := range expectedPCRPolicy.PCRs {
 		digest, ok := pcrDigestByIndex[idx]
 		if !ok {
@@ -92,7 +161,10 @@ func VerifyPolicyDigest(public []byte, expectedPCRPolicy PolicyPCRs, pcrsState [
 		return fmt.Errorf("failed to unmarshal public key: %w", err)
 	}
 
-	expectedPolicyDigest, err := computePolicyDigestFromPCRs(expectedPCRPolicy, pcrsState)
+	// The policy session hash has to be the object's nameAlg, otherwise the TPM would not have
+	// accepted the resulting digest as this object's auth policy in the first place.
+	// Please refer to Part 1, Architecture, section 27.2
+	expectedPolicyDigest, err := computePolicyDigestFromPCRs(expectedPCRPolicy, pcrsState, pub.NameAlg)
 	if err != nil {
 		return fmt.Errorf("failed to compute auth policy: %w", err)
 	}
