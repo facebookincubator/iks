@@ -165,7 +165,11 @@ func GenerateSigningKey(tpm *TPM, alg tpm2.TPMAlgID) (public []byte, private []b
 func GenerateSigningKeyWithPolicy(tpm *TPM, alg tpm2.TPMAlgID, pcrs ...uint) (public []byte, private []byte, err error) {
 	var keyTemplate tpm2.TPMTPublic
 
-	pcrSelection := tpm.SelectPCRs(pcrs...)
+	pcrSelection, err := tpm.SelectPCRs(pcrs...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to select PCRs: %w", err)
+	}
+
 	session, sessionCloser, err := tpm.NewSession()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create policy session: %w", err)

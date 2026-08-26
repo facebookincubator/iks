@@ -585,11 +585,19 @@ func (tpm *TPM) PCRPolicy(sessionHandle tpm2.TPMHandle, pcrSelection tpm2.TPMLPC
 	return resp.PolicyDigest, nil
 }
 
-// SelectPCRs reads the provided PCRs indexes and returns the selection as a TPML_PCR_SELECTION
-func (tpm *TPM) SelectPCRs(pcrs ...uint) tpm2.TPMLPCRSelection {
+// SelectPCRs reads the provided PCRs indexes and returns the selection as a TPML_PCR_SELECTION.
+// The bank comes from getPCRHashAlg so that the selection names the same bank ReadPCRs and Quote
+// report values from. A policy built over one bank cannot be reproduced from state attested over
+// another, so this must not be pinned independently of those two.
+func (tpm *TPM) SelectPCRs(pcrs ...uint) (tpm2.TPMLPCRSelection, error) {
+	alg, err := tpm.getPCRHashAlg()
+	if err != nil {
+		return tpm2.TPMLPCRSelection{}, fmt.Errorf("could not read TPM PCR algorithms: %w", err)
+	}
+
 	// Select PCRs
 	pcrSelection := tpm2.TPMSPCRSelection{
-		Hash:      tpm2.TPMAlgSHA256,
+		Hash:      alg,
 		PCRSelect: tpm2.PCClientCompatible.PCRs(pcrs...),
 	}
 	// Create List from Selection
@@ -597,7 +605,7 @@ func (tpm *TPM) SelectPCRs(pcrs ...uint) tpm2.TPMLPCRSelection {
 		PCRSelections: []tpm2.TPMSPCRSelection{pcrSelection},
 	}
 
-	return pcrSelectionList
+	return pcrSelectionList, nil
 }
 
 // PCR represents a TPM Platform Register.
@@ -1369,8 +1377,11 @@ func ParsePublicKey(contents *tpm2.TPMTPublic) (crypto.PublicKey, error) {
 
 func pcrPolicyCallback(tpm *TPM, pcrs []uint) tpm2.PolicyCallback {
 	return func(t transport.TPM, handle tpm2.TPMISHPolicy, _ tpm2.TPM2BNonce) error {
-		pcrSelection := tpm.SelectPCRs(pcrs...)
-		_, err := tpm2.PolicyPCR{
+		pcrSelection, err := tpm.SelectPCRs(pcrs...)
+		if err != nil {
+			return fmt.Errorf("failed to select PCRs: %w", err)
+		}
+		_, err = tpm2.PolicyPCR{
 			PolicySession: handle,
 			PcrDigest:     tpm2.TPM2BDigest{},
 			Pcrs:          pcrSelection,
