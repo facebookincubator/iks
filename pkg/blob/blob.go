@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 )
 
 var (
@@ -41,6 +42,9 @@ const (
 type Type byte
 
 const (
+	// TypeUnknown is the zero value, returned by GetType when the data is too
+	// short to carry a type byte. It is not a valid blob type.
+	TypeUnknown Type = 0
 	// WrapTypeSW represents software wrapped data.
 	WrapTypeSW Type = 1
 	// WrapTypeTPM represents TPM wrapped data.
@@ -96,51 +100,120 @@ func Pack(b *Blob) []byte {
 	return buffer
 }
 
+// reader walks a serialized blob and refuses any read that would run past the
+// end of the buffer. Every length in the wire format is taken from the buffer
+// itself, so a truncated or corrupted blob can declare a field longer than
+// what remains; each read is checked rather than assumed.
+type reader struct {
+	data []byte
+	off  int
+}
+
+// remaining reports how many bytes are left to read.
+func (r *reader) remaining() int {
+	return len(r.data) - r.off
+}
+
+func (r *reader) readByte() (byte, error) {
+	if r.remaining() < 1 {
+		return 0, io.ErrUnexpectedEOF
+	}
+	b := r.data[r.off]
+	r.off++
+	return b, nil
+}
+
+func (r *reader) readUint16() (uint16, error) {
+	if r.remaining() < 2 {
+		return 0, io.ErrUnexpectedEOF
+	}
+	v := binary.LittleEndian.Uint16(r.data[r.off : r.off+2])
+	r.off += 2
+	return v, nil
+}
+
+// readBytes returns the next n bytes. The result aliases the input buffer, as
+// it did before, so callers must not retain it beyond the lifetime of data.
+func (r *reader) readBytes(n int) ([]byte, error) {
+	if n < 0 || r.remaining() < n {
+		return nil, io.ErrUnexpectedEOF
+	}
+	b := r.data[r.off : r.off+n]
+	r.off += n
+	return b, nil
+}
+
 // Unpack tries to deserialize a blob from a byte slice,
 // and fails if the blob type is not the expected one.
+//
+// A truncated or otherwise malformed blob is reported as an error. Unpack does
+// not panic on any input.
 func Unpack(data []byte, expectedType Type) (*Blob, error) {
-	if len(data) < 1 || data[0] != byte(expectedType) {
-		return nil, fmt.Errorf("%w: invalid blob type %v", ErrMismatchedTypes, data[0])
+	r := &reader{data: data}
+
+	btype, err := r.readByte()
+	if err != nil {
+		return nil, fmt.Errorf("%w: blob is empty", ErrMismatchedTypes)
+	}
+	if btype != byte(expectedType) {
+		return nil, fmt.Errorf("%w: invalid blob type %v", ErrMismatchedTypes, btype)
 	}
 
 	var b Blob
-	b.Btype = Type(data[0])
-	b.Stype = SessionType(data[1])
-	offset := 2
+	b.Btype = Type(btype)
 
-	pubLen, err := unpackInt16(data[offset : offset+2])
+	stype, err := r.readByte()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get session type: %w", err)
 	}
-	privLen, err := unpackInt16(data[offset+2 : offset+4])
-	if err != nil {
-		return nil, err
-	}
-	offset += 4
-	b.Public = data[offset : offset+int(pubLen)]
-	offset += int(pubLen)
-	b.Private = data[offset : offset+int(privLen)]
-	offset += int(privLen)
+	b.Stype = SessionType(stype)
 
-	pcrLen := int(data[offset])
-	offset++
-	b.PCRs = make([]uint, pcrLen)
-	for i := range pcrLen {
-		b.PCRs[i] = uint(data[offset])
-		offset++
+	pubLen, err := r.readUint16()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get public length: %w", err)
 	}
-	seedLen, err := unpackInt16(data[offset : offset+2])
+	privLen, err := r.readUint16()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get private length: %w", err)
+	}
+
+	if b.Public, err = r.readBytes(int(pubLen)); err != nil {
+		return nil, fmt.Errorf("failed to get %d byte public area: %w", pubLen, err)
+	}
+	if b.Private, err = r.readBytes(int(privLen)); err != nil {
+		return nil, fmt.Errorf("failed to get %d byte private area: %w", privLen, err)
+	}
+
+	pcrLen, err := r.readByte()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PCR count: %w", err)
+	}
+	pcrs, err := r.readBytes(int(pcrLen))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get %d PCR indices: %w", pcrLen, err)
+	}
+	b.PCRs = make([]uint, len(pcrs))
+	for i, pcr := range pcrs {
+		b.PCRs[i] = uint(pcr)
+	}
+
+	seedLen, err := r.readUint16()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get encryptedSeed length: %w", err)
 	}
-	offset += 2
-	b.EncryptedSeeds = data[offset : offset+int(seedLen)]
+	if b.EncryptedSeeds, err = r.readBytes(int(seedLen)); err != nil {
+		return nil, fmt.Errorf("failed to get %d byte encrypted seeds: %w", seedLen, err)
+	}
 
 	return &b, nil
 }
 
-// GetType returns the blob type of a serialized blob.
+// GetType returns the blob type of a serialized blob, or TypeUnknown if the
+// data is too short to carry one.
 func GetType(data []byte) Type {
+	if len(data) < 1 {
+		return TypeUnknown
+	}
 	return Type(data[0])
 }
 
@@ -148,11 +221,4 @@ func packInt16(d uint16) []byte {
 	b := make([]byte, 2)
 	binary.LittleEndian.PutUint16(b, d)
 	return b
-}
-
-func unpackInt16(b []byte) (uint16, error) {
-	if len(b) != 2 {
-		return 0, fmt.Errorf("invalid int16 length: %d", len(b))
-	}
-	return binary.LittleEndian.Uint16(b), nil
 }
