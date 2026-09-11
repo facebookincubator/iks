@@ -17,6 +17,7 @@
 package chipid
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -67,6 +68,11 @@ var aspDeviceIDs = map[uint16]bool{
 	0x1649: true, // Family 19h?
 	0x17D8: true, // Turin
 }
+
+// aspChipIDSentinel seeds the DMA buffer before a GET_ID. A command that
+// reports success without ever writing leaves the buffer at its make() zero
+// value, which is indistinguishable from a ChipID the ASP really returned.
+var aspChipIDSentinel = bytes.Repeat([]byte{0xDE, 0xAD, 0xBE, 0xEF}, amdChipIDSize/4)
 
 // aspDevice represents an AMD ASP PCIe device
 type aspDevice struct {
@@ -303,7 +309,8 @@ func getChipIDFromDevice(dev aspDevice) (*Result, error) {
 	if err := unix.Mlock(chipIDBuf); err != nil {
 		return nil, fmt.Errorf("failed to lock Chip ID buffer in memory: %w", err)
 	}
-	defer unix.Munlock(chipIDBuf)
+	defer func() { _ = unix.Munlock(chipIDBuf) }()
+	copy(chipIDBuf, aspChipIDSentinel)
 
 	// Get physical address of the buffer
 	// This requires reading /proc/self/pagemap
@@ -345,9 +352,9 @@ func getChipIDFromDevice(dev aspDevice) (*Result, error) {
 	}
 
 	// Read the returned length
-	idLen := binary.LittleEndian.Uint32(cmdBuf[8:12])
-	if idLen == 0 || idLen > amdChipIDSize {
-		return nil, fmt.Errorf("invalid chip ID length: %d", idLen)
+	idLen := int(binary.LittleEndian.Uint32(cmdBuf[8:12]))
+	if err := checkDMAChipID(chipIDBuf, idLen); err != nil {
+		return nil, err
 	}
 
 	// Extract the chip ID
@@ -358,6 +365,24 @@ func getChipIDFromDevice(dev aspDevice) (*Result, error) {
 		Vendor: VendorAMDSEVSNP,
 		ID:     chipID,
 	}, nil
+}
+
+// checkDMAChipID rejects a GET_ID result the ASP did not really produce. The
+// length is an in/out field the caller populates itself, so a command that
+// completes without touching either buffer still reports a plausible one and
+// the length alone cannot be trusted; the sentinel is what separates the two
+// cases. No real part reports an all-zero ChipID either.
+func checkDMAChipID(buf []byte, idLen int) error {
+	if bytes.Equal(buf, aspChipIDSentinel) {
+		return errors.New("ASP GET_ID reported success without writing the ChipID buffer")
+	}
+	if idLen <= 0 || idLen > len(buf) {
+		return fmt.Errorf("invalid chip ID length: %d", idLen)
+	}
+	if bytes.Count(buf[:idLen], []byte{0}) == idLen {
+		return errors.New("ASP GET_ID returned an all-zero ChipID")
+	}
+	return nil
 }
 
 // getPhysicalAddress returns the physical address of a byte slice
