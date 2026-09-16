@@ -15,10 +15,8 @@
 package tpm
 
 import (
-	"crypto/x509"
 	"fmt"
 
-	attestHelper "github.com/google/go-attestation/attest"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 )
@@ -151,15 +149,6 @@ func (tpm *TPM) Certify(handle tpm2.TPMHandle, signerHandle tpm2.TPMHandle, alg 
 	}
 
 	return
-}
-
-// GetEKCert reads the EK certificate from NV storage.
-func (tpm *TPM) GetEKCert(certIndex tpm2.TPMHandle, password string) (*x509.Certificate, error) {
-	certBytes, err := tpm.ReadFromNVStorage(certIndex, password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read EK certificate from NV storage: %w", err)
-	}
-	return attestHelper.ParseEKCertificate(certBytes)
 }
 
 // MakeCredential creates credential/secret challenge tied to objectName.
