@@ -15,7 +15,7 @@ require (
 
 require (
 	github.com/GoogleCloudPlatform/confidential-space/server v0.0.0-20260307011055-895ec9019dd7 // indirect
-	github.com/containerd/containerd v1.7.32 // indirect
+	github.com/containerd/containerd v1.7.36 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/go-configfs-tsm v0.3.3-0.20240919001351-b4b5b84fdcbc // indirect
 	github.com/google/go-sev-guest v0.14.0 // indirect
