@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/edsrzf/mmap-go v1.2.0
-	github.com/google/go-attestation v0.6.0
+	github.com/google/go-attestation v0.6.1
 	github.com/google/go-eventlog v0.0.3-0.20260305053119-5cd85087f9f9
 	github.com/google/go-tpm v0.9.8
 	github.com/google/go-tpm-tools v0.4.8
