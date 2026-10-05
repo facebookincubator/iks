@@ -1389,3 +1389,9 @@ func pcrPolicyCallback(tpm *TPM, pcrs []uint) tpm2.PolicyCallback {
 		return err
 	}
 }
+
+// GetTransport is a helper function for users to get a TPM transport to
+// execute commands directly.
+func (tpm *TPM) GetTransport() transport.TPM {
+	return transport.FromReadWriter(tpm.rwc)
+}
