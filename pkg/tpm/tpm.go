@@ -20,6 +20,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -1085,6 +1086,38 @@ func (tpm *TPM) Clear(password string) error {
 		return fmt.Errorf("failed to execute Clear command: %w", err)
 	}
 	return nil
+}
+
+var (
+	// ErrLockoutAuthLocked means lockoutAuth is itself locked out after an earlier failed attempt,
+	// and stays unusable until lockoutRecovery seconds of powered time have passed.
+	ErrLockoutAuthLocked = errors.New("lockout authorization is locked out")
+	// ErrLockoutAuthFailed means the lockout password was rejected. The TPM now refuses lockoutAuth
+	// for lockoutRecovery seconds, so callers must not retry.
+	ErrLockoutAuthFailed = errors.New("lockout authorization failed")
+)
+
+// DictionaryAttackLockReset sets the dictionary attack failure counter to zero, taking the TPM out
+// of DA lockout. It is authorized with lockoutAuth, which still works while the TPM is in lockout.
+// It does not touch keys, NV indices or hierarchy passwords.
+func (tpm *TPM) DictionaryAttackLockReset(password string) error {
+	cmd := tpm2.DictionaryAttackLockReset{
+		LockHandle: tpm2.AuthHandle{
+			Handle: tpm2.TPMRHLockout,
+			Auth:   tpm2.PasswordAuth([]byte(password)),
+		},
+	}
+	_, err := cmd.Execute(transport.FromReadWriter(tpm.rwc))
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, tpm2.TPMRCLockout):
+		return fmt.Errorf("%w: %w", ErrLockoutAuthLocked, err)
+	case errors.Is(err, tpm2.TPMRCAuthFail), errors.Is(err, tpm2.TPMRCBadAuth):
+		return fmt.Errorf("%w: %w", ErrLockoutAuthFailed, err)
+	default:
+		return fmt.Errorf("failed to execute DictionaryAttackLockReset command: %w", err)
+	}
 }
 
 // GetRandomBytes returns random bytes from the TPM.
