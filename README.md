@@ -7,6 +7,7 @@
 - [`pkg/tpm`](pkg/tpm) — open and operate on a TPM 2.0 device: NV index management, key creation and loading, signing, quoting/attestation, sealing and wrapping, and policy-digest construction.
 - [`pkg/blob`](pkg/blob) — typed serialization format for TPM-wrapped data (software-wrapped vs. TPM-wrapped, session type, algorithm metadata).
 - [`pkg/chipid`](pkg/chipid) — extract a CPU/platform chip identifier (e.g. AMD SEV-SNP) from the UEFI TPM event log.
+- [`pkg/iommu`](pkg/iommu) — report which NICs sit in an IOMMU identity (passthrough) domain, where DMA translation is bypassed.
 - [`pkg/logging`](pkg/logging) — small `log/slog` handlers, including a syslog handler and a no-op handler for tests.
 
 ## Requirements
@@ -14,6 +15,7 @@
 - Go 1.22 or later.
 - A TPM 2.0 device accessible via `/dev/tpmrm0` (or `/dev/tpm0`) on Linux. Most operations require appropriate privileges to open the TPM device.
 - `pkg/chipid` reads the UEFI event log from `/sys/kernel/security/tpm0/binary_bios_measurements` and is Linux-only.
+- `pkg/iommu` reads `/sys/class/net` and `/sys/kernel/iommu_groups` and is Linux-only.
 
 ## Usage
 
