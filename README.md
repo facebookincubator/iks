@@ -8,6 +8,7 @@
 - [`pkg/blob`](pkg/blob) — typed serialization format for TPM-wrapped data (software-wrapped vs. TPM-wrapped, session type, algorithm metadata).
 - [`pkg/chipid`](pkg/chipid) — extract a CPU/platform chip identifier (e.g. AMD SEV-SNP) from the UEFI TPM event log.
 - [`pkg/iommu`](pkg/iommu) — report which NICs sit in an IOMMU identity (passthrough) domain, where DMA translation is bypassed.
+- [`pkg/redfish`](pkg/redfish) — a small Redfish client for a BMC's device-integrity data: ComponentIntegrity (SPDM measurement sets and the TPM signed-measurement action), the manager's 802.1AR identity certificate, and the network adapters and ports behind them.
 - [`pkg/logging`](pkg/logging) — small `log/slog` handlers, including a syslog handler and a no-op handler for tests.
 
 ## Requirements
