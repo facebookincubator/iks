@@ -17,6 +17,7 @@ package tpm
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/google/go-tpm/tpm2"
@@ -24,8 +25,8 @@ import (
 
 func reverse(data []byte) []byte {
 	var reversed []byte
-	for i := len(data) - 1; i >= 0; i-- {
-		reversed = append(reversed, data[i])
+	for _, d := range slices.Backward(data) {
+		reversed = append(reversed, d)
 	}
 	return reversed
 }
