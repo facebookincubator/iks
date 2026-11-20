@@ -6,7 +6,7 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/google/go-attestation v0.6.1
 	github.com/google/go-eventlog v0.0.3-0.20260305053119-5cd85087f9f9
-	github.com/google/go-tpm v0.9.8
+	github.com/google/go-tpm v0.9.9-0.20261026145737-805f7f6ea460
 	github.com/google/go-tpm-tools v0.4.8
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/mock v0.6.0
